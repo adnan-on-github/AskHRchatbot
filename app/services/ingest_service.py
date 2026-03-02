@@ -10,7 +10,7 @@ from langchain_community.document_loaders import (
     WebBaseLoader,
 )
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_openai import OpenAIEmbeddings
+from langchain_openai import OpenAIEmbeddings, AzureOpenAIEmbeddings
 from langchain_chroma import Chroma
 from loguru import logger
 
@@ -26,14 +26,35 @@ class IngestService:
 
     def __init__(self) -> None:
         self.settings = get_settings()
-        self.embeddings = OpenAIEmbeddings(
-            model=self.settings.embedding_model,
-            api_key=self.settings.openai_api_key,
-        )
+        self.embeddings = self._build_embeddings()
         self.splitter = RecursiveCharacterTextSplitter(
             chunk_size=self.settings.chunk_size,
             chunk_overlap=self.settings.chunk_overlap,
             separators=["\n\n", "\n", ".", " ", ""],
+        )
+
+    # ------------------------------------------------------------------ #
+    # Embeddings factory                                                    #
+    # ------------------------------------------------------------------ #
+
+    def _build_embeddings(self):
+        if self.settings.is_azure:
+            kwargs = dict(
+                azure_deployment=self.settings.azure_openai_embedding_deployment,
+                azure_endpoint=self.settings.azure_openai_endpoint,
+                api_version=self.settings.azure_openai_api_version,
+            )
+            if self.settings.use_managed_identity:
+                from app.core.azure_auth import get_token_provider
+                kwargs["azure_ad_token_provider"] = get_token_provider()
+            else:
+                kwargs["api_key"] = self.settings.azure_openai_api_key
+            logger.info("IngestService using AzureOpenAIEmbeddings")
+            return AzureOpenAIEmbeddings(**kwargs)
+        logger.info("IngestService using OpenAIEmbeddings")
+        return OpenAIEmbeddings(
+            model=self.settings.embedding_model,
+            api_key=self.settings.openai_api_key,
         )
 
     # ------------------------------------------------------------------ #

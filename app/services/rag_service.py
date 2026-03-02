@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import AsyncGenerator
 
 from langchain_chroma import Chroma
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings, AzureChatOpenAI, AzureOpenAIEmbeddings
 from langchain.memory import ConversationBufferWindowMemory
 from langchain.chains import ConversationalRetrievalChain
 from langchain.prompts import PromptTemplate, SystemMessagePromptTemplate, HumanMessagePromptTemplate, ChatPromptTemplate
@@ -38,21 +38,13 @@ class RAGService:
         self.settings = get_settings()
         self._sessions: dict[str, ConversationBufferWindowMemory] = {}
 
-        self.embeddings = OpenAIEmbeddings(
-            model=self.settings.embedding_model,
-            api_key=self.settings.openai_api_key,
-        )
+        self.embeddings = self._build_embeddings()
         self.vectorstore = Chroma(
             collection_name=self.settings.chroma_collection_name,
             embedding_function=self.embeddings,
             persist_directory=self.settings.chroma_persist_dir,
         )
-        self.llm = ChatOpenAI(
-            model=self.settings.llm_model,
-            temperature=self.settings.llm_temperature,
-            api_key=self.settings.openai_api_key,
-            streaming=True,
-        )
+        self.llm = self._build_llm(streaming=True)
 
         # Build the chat prompt
         messages = [
@@ -74,10 +66,53 @@ class RAGService:
             messages=messages,
         )
 
-        logger.info(
-            "RAGService initialised | model={} embedding={}",
-            self.settings.llm_model,
-            self.settings.embedding_model,
+        mode = "Azure OpenAI (Managed Identity)" if self.settings.use_managed_identity else (
+            "Azure OpenAI (API key)" if self.settings.is_azure else "OpenAI"
+        )
+        logger.info("RAGService initialised | mode={}", mode)
+
+    # ------------------------------------------------------------------ #
+    # LLM / Embeddings factory                                             #
+    # ------------------------------------------------------------------ #
+
+    def _build_embeddings(self):
+        if self.settings.is_azure:
+            kwargs = dict(
+                azure_deployment=self.settings.azure_openai_embedding_deployment,
+                azure_endpoint=self.settings.azure_openai_endpoint,
+                api_version=self.settings.azure_openai_api_version,
+            )
+            if self.settings.use_managed_identity:
+                from app.core.azure_auth import get_token_provider
+                kwargs["azure_ad_token_provider"] = get_token_provider()
+            else:
+                kwargs["api_key"] = self.settings.azure_openai_api_key
+            return AzureOpenAIEmbeddings(**kwargs)
+        return OpenAIEmbeddings(
+            model=self.settings.embedding_model,
+            api_key=self.settings.openai_api_key,
+        )
+
+    def _build_llm(self, streaming: bool = False):
+        if self.settings.is_azure:
+            kwargs = dict(
+                azure_deployment=self.settings.azure_openai_chat_deployment,
+                azure_endpoint=self.settings.azure_openai_endpoint,
+                api_version=self.settings.azure_openai_api_version,
+                temperature=self.settings.llm_temperature,
+                streaming=streaming,
+            )
+            if self.settings.use_managed_identity:
+                from app.core.azure_auth import get_token_provider
+                kwargs["azure_ad_token_provider"] = get_token_provider()
+            else:
+                kwargs["api_key"] = self.settings.azure_openai_api_key
+            return AzureChatOpenAI(**kwargs)
+        return ChatOpenAI(
+            model=self.settings.llm_model,
+            temperature=self.settings.llm_temperature,
+            api_key=self.settings.openai_api_key,
+            streaming=streaming,
         )
 
     # ------------------------------------------------------------------ #
@@ -135,13 +170,8 @@ class RAGService:
             },
         )
 
-        streaming_llm = ChatOpenAI(
-            model=self.settings.llm_model,
-            temperature=self.settings.llm_temperature,
-            api_key=self.settings.openai_api_key,
-            streaming=True,
-            callbacks=[callback],
-        )
+        streaming_llm = self._build_llm(streaming=True)
+        streaming_llm.callbacks = [callback]
 
         chain = ConversationalRetrievalChain.from_llm(
             llm=streaming_llm,

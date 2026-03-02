@@ -1,0 +1,159 @@
+# =============================================================================
+# AskHR Chatbot — Azure DevOps Pipeline
+# =============================================================================
+# Required pipeline variables (set in Azure DevOps → Pipeline → Variables):
+#   ACR_NAME               e.g. askhrregistry
+#   RESOURCE_GROUP         e.g. rg-askhr
+#   CONTAINERAPPS_ENV      e.g. cae-askhr
+#
+# Required service connections (Azure DevOps → Project Settings → Service connections):
+#   AzureSubscription      Azure Resource Manager connection (Contributor scope)
+#   AskHR-ACR             Docker Registry connection pointing at your ACR
+# =============================================================================
+
+trigger:
+  branches:
+    include:
+      - main
+  paths:
+    exclude:
+      - "*.md"
+      - "infra/**"
+      - ".env.example"
+
+pr:
+  branches:
+    include:
+      - main
+
+variables:
+  BACKEND_IMAGE: $(ACR_NAME).azurecr.io/askhr-backend
+  FRONTEND_IMAGE: $(ACR_NAME).azurecr.io/askhr-frontend
+  IMAGE_TAG: $(Build.BuildId)
+  PYTHON_VERSION: "3.12"
+
+stages:
+
+  # ─── Stage 1: Test ──────────────────────────────────────────────────────────
+  - stage: Test
+    displayName: "Run Tests"
+    jobs:
+      - job: UnitTests
+        displayName: "pytest"
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: $(PYTHON_VERSION)
+
+          - script: |
+              pip install --upgrade pip
+              pip install -r requirements.txt
+            displayName: "Install dependencies"
+
+          - script: |
+              pytest tests/ -v --tb=short --junitxml=test-results.xml
+            displayName: "Run pytest"
+
+          - task: PublishTestResults@2
+            condition: always()
+            inputs:
+              testResultsFormat: JUnit
+              testResultsFiles: test-results.xml
+              failTaskOnFailedTests: true
+
+  # ─── Stage 2: Build & Push ──────────────────────────────────────────────────
+  - stage: Build
+    displayName: "Build & Push Images"
+    dependsOn: Test
+    condition: succeeded()
+    jobs:
+      - job: BuildImages
+        displayName: "Docker build → ACR"
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - task: Docker@2
+            displayName: "Build & push backend image"
+            inputs:
+              command: buildAndPush
+              containerRegistry: AskHR-ACR
+              repository: askhr-backend
+              dockerfile: Dockerfile
+              buildContext: .
+              tags: |
+                $(IMAGE_TAG)
+                latest
+
+          - task: Docker@2
+            displayName: "Build & push frontend image"
+            inputs:
+              command: buildAndPush
+              containerRegistry: AskHR-ACR
+              repository: askhr-frontend
+              dockerfile: frontend/Dockerfile
+              buildContext: frontend
+              tags: |
+                $(IMAGE_TAG)
+                latest
+
+  # ─── Stage 3: Deploy ────────────────────────────────────────────────────────
+  - stage: Deploy
+    displayName: "Deploy to Azure Container Apps"
+    dependsOn: Build
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    jobs:
+      - deployment: DeployContainerApps
+        displayName: "Update Container Apps"
+        pool:
+          vmImage: ubuntu-latest
+        environment: production
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - task: AzureCLI@2
+                  displayName: "Update backend Container App"
+                  inputs:
+                    azureSubscription: AzureSubscription
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    inlineScript: |
+                      az containerapp update \
+                        --name askhr-backend \
+                        --resource-group $(RESOURCE_GROUP) \
+                        --image $(BACKEND_IMAGE):$(IMAGE_TAG)
+
+                - task: AzureCLI@2
+                  displayName: "Update frontend Container App"
+                  inputs:
+                    azureSubscription: AzureSubscription
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    inlineScript: |
+                      az containerapp update \
+                        --name askhr-frontend \
+                        --resource-group $(RESOURCE_GROUP) \
+                        --image $(FRONTEND_IMAGE):$(IMAGE_TAG)
+
+                - task: AzureCLI@2
+                  displayName: "Verify deployments"
+                  inputs:
+                    azureSubscription: AzureSubscription
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    inlineScript: |
+                      echo "Backend:"
+                      az containerapp show \
+                        --name askhr-backend \
+                        --resource-group $(RESOURCE_GROUP) \
+                        --query "{url: properties.configuration.ingress.fqdn, revision: properties.latestRevisionName}" \
+                        -o table
+
+                      echo "Frontend:"
+                      az containerapp show \
+                        --name askhr-frontend \
+                        --resource-group $(RESOURCE_GROUP) \
+                        --query "{url: properties.configuration.ingress.fqdn, revision: properties.latestRevisionName}" \
+                        -o table
