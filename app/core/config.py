@@ -10,8 +10,18 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    # Provider selection  ("openai" | "huggingface")
+    llm_provider: str = "openai"          # startup default shown in sidebar
+    embedding_provider: str = "openai"    # controls which embeddings go into ChromaDB
+
     # OpenAI
     openai_api_key: str = ""
+
+    # HuggingFace
+    hf_api_token: str = ""                # HuggingFace Hub token (Inference API)
+    hf_llm_model: str = "meta-llama/Llama-3-8B-Instruct"  # default HF chat model
+    hf_embedding_model: str = "BAAI/bge-small-en-v1.5"    # default HF embedding model
+    hf_access_mode: str = "api"           # "api" (Inference API) | "local" (load weights)
 
     # ChromaDB
     chroma_persist_dir: str = "./chroma_db"

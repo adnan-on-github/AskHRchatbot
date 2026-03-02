@@ -28,14 +28,22 @@ async def chat(
     - The final SSE event contains a JSON payload with `sources`.
     - Pass the same `session_id` across turns to maintain conversation history.
     """
-    logger.info("POST /chat | session={}", request.session_id)
+    logger.info(
+        "POST /chat | session={} provider={}",
+        request.session_id, request.provider,
+    )
 
     async def event_generator():
         full_answer = ""
         sources_json: str | None = None
 
         try:
-            async for token in rag.stream_chat(request.session_id, request.message):
+            async for token in rag.stream_chat(
+                request.session_id,
+                request.message,
+                provider=request.provider,
+                hf_access_mode=request.hf_access_mode,
+            ):
                 if token.startswith("\n__SOURCES__"):
                     sources_json = token.replace("\n__SOURCES__", "")
                     break
@@ -73,10 +81,18 @@ async def chat_sync(
     rag: RAGService = Depends(get_rag_service),
 ) -> ChatResponse:
     """Non-streaming endpoint — returns the full answer in one JSON response."""
-    logger.info("POST /chat/sync | session={}", request.session_id)
+    logger.info(
+        "POST /chat/sync | session={} provider={}",
+        request.session_id, request.provider,
+    )
 
     try:
-        answer, source_docs = await rag.chat(request.session_id, request.message)
+        answer, source_docs = await rag.chat(
+            request.session_id,
+            request.message,
+            provider=request.provider,
+            hf_access_mode=request.hf_access_mode,
+        )
     except Exception as exc:
         logger.exception("Chat error for session={}", request.session_id)
         raise HTTPException(

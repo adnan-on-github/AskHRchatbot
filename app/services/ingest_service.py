@@ -10,11 +10,11 @@ from langchain_community.document_loaders import (
     WebBaseLoader,
 )
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_openai import OpenAIEmbeddings
 from langchain_chroma import Chroma
 from loguru import logger
 
 from app.core.config import get_settings
+from app.services.rag_service import build_embeddings
 
 if TYPE_CHECKING:
     from langchain_core.documents import Document
@@ -22,14 +22,11 @@ if TYPE_CHECKING:
 
 class IngestService:
     """Loads HR documents (PDF, DOCX, URLs), splits them into chunks,
-    embeds via OpenAI and stores in ChromaDB."""
+    embeds and stores in ChromaDB (respects EMBEDDING_PROVIDER setting)."""
 
     def __init__(self) -> None:
         self.settings = get_settings()
-        self.embeddings = OpenAIEmbeddings(
-            model=self.settings.embedding_model,
-            api_key=self.settings.openai_api_key,
-        )
+        self.embeddings = build_embeddings(self.settings)
         self.splitter = RecursiveCharacterTextSplitter(
             chunk_size=self.settings.chunk_size,
             chunk_overlap=self.settings.chunk_overlap,

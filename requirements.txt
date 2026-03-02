@@ -8,6 +8,14 @@ langchain==0.3.19
 langchain-openai==0.3.6
 langchain-community==0.3.18
 langchain-chroma==0.2.2
+langchain-huggingface==0.1.2
+
+# HuggingFace
+huggingface-hub==0.28.1
+sentence-transformers==3.4.1
+# transformers and torch are required for hf_access_mode=local (large packages, install manually):
+# transformers>=4.40.0
+# torch>=2.2.0
 
 # Vector store
 chromadb==0.6.3

@@ -10,6 +10,11 @@ services:
       CHROMA_PERSIST_DIR: /app/chroma_db
       DOCUMENTS_DIR: /app/data/documents
       WEB_SOURCES_FILE: /app/data/web_sources.txt
+      # Provider defaults — users can override per-session in the sidebar
+      LLM_PROVIDER: openai
+      EMBEDDING_PROVIDER: openai
+      HF_ACCESS_MODE: api
+      # HF_API_TOKEN: hf_...   # uncomment and set if using HuggingFace Inference API
     volumes:
       - ./data:/app/data          # HR document files
       - ./chroma_db:/app/chroma_db  # Persist vector DB

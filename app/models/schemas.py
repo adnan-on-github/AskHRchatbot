@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 import uuid
 
@@ -10,6 +12,14 @@ class ChatRequest(BaseModel):
         description="Unique session ID for multi-turn conversation tracking.",
     )
     message: str = Field(..., min_length=1, max_length=4096, description="User's HR question.")
+    provider: Literal["openai", "huggingface"] = Field(
+        default="openai",
+        description="LLM provider to use for this request.",
+    )
+    hf_access_mode: Literal["api", "local"] = Field(
+        default="api",
+        description="HuggingFace access mode: 'api' for Inference API, 'local' to load weights.",
+    )
 
 
 class SourceDocument(BaseModel):

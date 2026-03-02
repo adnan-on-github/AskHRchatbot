@@ -31,6 +31,10 @@ if "session_id" not in st.session_state:
     st.session_state.session_id = str(uuid.uuid4())
 if "messages" not in st.session_state:
     st.session_state.messages: list[dict] = []
+if "provider" not in st.session_state:
+    st.session_state.provider = os.environ.get("LLM_PROVIDER", "openai")
+if "hf_access_mode" not in st.session_state:
+    st.session_state.hf_access_mode = "api"
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────
@@ -43,13 +47,18 @@ def check_backend_health() -> bool:
         return False
 
 
-def stream_answer(session_id: str, message: str):
+def stream_answer(session_id: str, message: str, provider: str = "openai", hf_access_mode: str = "api"):
     """
     Stream tokens from the FastAPI SSE endpoint.
     Yields (token: str | None, sources: list | None).
     Token=None + sources payload signals the end of the stream.
     """
-    payload = {"session_id": session_id, "message": message}
+    payload = {
+        "session_id": session_id,
+        "message": message,
+        "provider": provider,
+        "hf_access_mode": hf_access_mode,
+    }
     with httpx.stream("POST", CHAT_STREAM_URL, json=payload, timeout=120) as resp:
         resp.raise_for_status()
         for line in resp.iter_lines():
@@ -100,6 +109,33 @@ with st.sidebar:
         st.error("Backend: Unreachable ✗", icon="🔴")
 
     st.divider()
+    st.subheader("🤖 LLM Provider")
+
+    provider_choice = st.radio(
+        "Choose provider",
+        options=["openai", "huggingface"],
+        format_func=lambda x: "OpenAI" if x == "openai" else "HuggingFace",
+        index=0 if st.session_state.provider == "openai" else 1,
+        horizontal=True,
+        label_visibility="collapsed",
+    )
+    st.session_state.provider = provider_choice
+
+    if provider_choice == "huggingface":
+        hf_mode_choice = st.radio(
+            "HuggingFace access mode",
+            options=["api", "local"],
+            format_func=lambda x: "Inference API" if x == "api" else "Local (download weights)",
+            index=0 if st.session_state.hf_access_mode == "api" else 1,
+            horizontal=True,
+        )
+        st.session_state.hf_access_mode = hf_mode_choice
+        if hf_mode_choice == "api":
+            st.caption("Requires `HF_API_TOKEN` set on the backend.")
+        else:
+            st.caption("⚠️ Local mode downloads model weights — requires significant RAM/VRAM and `transformers`+`torch` installed.")
+
+    st.divider()
     st.subheader("Session")
     st.code(st.session_state.session_id[:8] + "…", language=None)
 
@@ -140,7 +176,9 @@ with st.sidebar:
 
     st.divider()
     st.caption(
-        "Powered by OpenAI GPT-4o · ChromaDB · LangChain · FastAPI · Streamlit"
+        "Powered by "
+        + ("OpenAI GPT-4o" if st.session_state.provider == "openai" else "HuggingFace")
+        + " · ChromaDB · LangChain · FastAPI · Streamlit"
     )
 
 
@@ -177,7 +215,10 @@ if prompt := st.chat_input("Ask an HR question…", disabled=not is_healthy):
 
         try:
             for token, src_payload in stream_answer(
-                st.session_state.session_id, prompt
+                st.session_state.session_id,
+                prompt,
+                provider=st.session_state.provider,
+                hf_access_mode=st.session_state.hf_access_mode,
             ):
                 if token is not None:
                     full_answer += token
