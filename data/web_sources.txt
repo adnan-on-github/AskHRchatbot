@@ -1,0 +1,5 @@
+# Add HR-related URLs here — one per line.
+# Lines starting with # are ignored.
+# Example:
+# https://yourcompany.com/hr-policy
+# https://yourcompany.com/employee-handbook

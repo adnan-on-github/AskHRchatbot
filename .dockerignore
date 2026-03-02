@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+*.pyo
+.env
+.venv
+venv/
+*.egg-info/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+chroma_db/
+logs/
+.git/
+.gitignore
+tests/
+*.md
+docker-compose.yml
