@@ -120,6 +120,7 @@ async def chat_sync(
     "/{session_id}",
     summary="Clear conversation history for a session",
     status_code=status.HTTP_204_NO_CONTENT,
+    response_model=None,
 )
 async def clear_session(
     session_id: str,
