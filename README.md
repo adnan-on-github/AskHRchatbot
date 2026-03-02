@@ -1,11 +1,15 @@
 # 💼 AskHR Chatbot
 
-A production-grade **Retrieval-Augmented Generation (RAG)** chatbot for HR-related queries, built with FastAPI, LangChain, OpenAI GPT-4o, ChromaDB, and a Streamlit chat frontend — fully containerised with Docker Compose.
+A production-grade **Retrieval-Augmented Generation (RAG)** chatbot for HR-related queries, built with FastAPI, LangChain, ChromaDB, and a Streamlit chat frontend — fully containerised with Docker Compose.
+
+Supports **OpenAI** (GPT-4o) and **HuggingFace** (Inference API or local model loading) as interchangeable LLM providers, switchable per-session from the chat UI.
 
 ---
 
 ## Features
 
+- **Dual LLM provider** — switch between **OpenAI** (GPT-4o) and **HuggingFace** (Inference API or local weights) per-session from the Streamlit sidebar, with no backend restart required
+- **Configurable embeddings** — use OpenAI or HuggingFace sentence-transformers for ChromaDB, controlled via `EMBEDDING_PROVIDER`
 - **Conversational RAG** — multi-turn chat with per-session memory (window of 10 exchanges)
 - **SSE streaming** — real-time token-by-token response delivery
 - **MMR retrieval** — Maximal Marginal Relevance retrieval for diverse, non-redundant context
@@ -21,8 +25,10 @@ A production-grade **Retrieval-Augmented Generation (RAG)** chatbot for HR-relat
 
 | Layer | Technology |
 |---|---|
-| LLM | OpenAI GPT-4o |
-| Embeddings | OpenAI `text-embedding-3-small` |
+| LLM (OpenAI) | OpenAI GPT-4o |
+| LLM (HuggingFace) | Any HF model via Inference API or local pipeline |
+| Embeddings (OpenAI) | `text-embedding-3-small` |
+| Embeddings (HuggingFace) | `BAAI/bge-small-en-v1.5` (sentence-transformers) |
 | Vector DB | ChromaDB (persistent) |
 | RAG framework | LangChain |
 | Backend API | FastAPI + Uvicorn |
@@ -77,7 +83,10 @@ AskHRchatbot/
 ### Prerequisites
 
 - Docker & Docker Compose
-- An OpenAI API key
+- At least one of:
+  - An **OpenAI API key** (`OPENAI_API_KEY`) — for the OpenAI provider
+  - A **HuggingFace token** (`HF_API_TOKEN`) — for HuggingFace Inference API mode
+  - No token needed for HuggingFace **local** mode (requires significant RAM/VRAM and `transformers` + `torch`)
 
 ### 1. Clone and configure
 
@@ -85,7 +94,7 @@ AskHRchatbot/
 git clone <repo-url>
 cd AskHRchatbot
 cp .env.example .env
-# Open .env and set your OPENAI_API_KEY
+# Edit .env — set OPENAI_API_KEY and/or HF_API_TOKEN
 ```
 
 ### 2. Add HR documents
@@ -117,6 +126,8 @@ curl -X POST http://localhost:8000/api/v1/ingest \
 
 Use `"reindex": true` to wipe and rebuild the vector index from scratch.
 
+> **Note:** The embedding model used at ingest time must match the one used at query time. Set `EMBEDDING_PROVIDER` (and related model vars) **before** your first ingest and keep it consistent.
+
 ### 5. Start chatting
 
 Open http://localhost:8501 and ask HR questions like:
@@ -125,6 +136,8 @@ Open http://localhost:8501 and ask HR questions like:
 - *"What is the remote work policy?"*
 - *"How do I submit an expense report?"*
 
+Use the **🤖 LLM Provider** section in the sidebar to switch between **OpenAI** and **HuggingFace** at any time. Your conversation history is preserved across provider switches.
+
 ---
 
 ## API Reference
@@ -132,8 +145,15 @@ Open http://localhost:8501 and ask HR questions like:
 ### `POST /api/v1/chat` — Streaming (SSE)
 
 ```json
-{ "session_id": "uuid", "message": "What is the leave policy?" }
+{
+  "session_id": "uuid",
+  "message": "What is the leave policy?",
+  "provider": "openai",
+  "hf_access_mode": "api"
+}
 ```
+
+`provider` can be `"openai"` or `"huggingface"`. `hf_access_mode` is `"api"` (HuggingFace Inference API) or `"local"` (load weights locally); ignored when `provider` is `"openai"`.
 
 Returns a `text/event-stream` of token events, with a final event containing the full answer and source documents.
 
@@ -173,20 +193,46 @@ Upload a PDF or DOCX via `multipart/form-data` (`file` field).
 
 All settings are controlled via environment variables (see `.env.example`):
 
+### Provider
+
 | Variable | Default | Description |
 |---|---|---|
-| `OPENAI_API_KEY` | — | **Required.** OpenAI API key |
+| `LLM_PROVIDER` | `openai` | Startup default shown in the sidebar (`openai` \| `huggingface`). Users can override per-session. |
+| `EMBEDDING_PROVIDER` | `openai` | Embedding backend used for ChromaDB ingestion and retrieval (`openai` \| `huggingface`). Set before first ingest. |
+
+### OpenAI
+
+| Variable | Default | Description |
+|---|---|---|
+| `OPENAI_API_KEY` | — | Required when using the OpenAI provider |
 | `LLM_MODEL` | `gpt-4o` | OpenAI chat model |
-| `EMBEDDING_MODEL` | `text-embedding-3-small` | OpenAI embedding model |
+| `EMBEDDING_MODEL` | `text-embedding-3-small` | OpenAI embedding model (used when `EMBEDDING_PROVIDER=openai`) |
 | `LLM_TEMPERATURE` | `0.2` | LLM response temperature |
+
+### HuggingFace
+
+| Variable | Default | Description |
+|---|---|---|
+| `HF_API_TOKEN` | — | HuggingFace Hub token. Required for `hf_access_mode=api`. |
+| `HF_LLM_MODEL` | `meta-llama/Llama-3-8B-Instruct` | Default HF chat model |
+| `HF_EMBEDDING_MODEL` | `BAAI/bge-small-en-v1.5` | HF embedding model (used when `EMBEDDING_PROVIDER=huggingface`) |
+| `HF_ACCESS_MODE` | `api` | Server-level default: `api` (Inference API) or `local` (download weights) |
+
+> **Local mode** requires `transformers` and `torch` to be installed (not included in `requirements.txt` due to size). Install them manually: `pip install transformers torch`.
+
+### General
+
+| Variable | Default | Description |
+|---|---|---|
 | `CHROMA_PERSIST_DIR` | `./chroma_db` | ChromaDB storage path |
 | `CHROMA_COLLECTION_NAME` | `askhr_docs` | ChromaDB collection name |
 | `CHUNK_SIZE` | `1000` | Document chunk size (tokens) |
 | `CHUNK_OVERLAP` | `200` | Chunk overlap (tokens) |
 | `RETRIEVER_K` | `5` | Number of chunks retrieved per query |
+| `MEMORY_WINDOW` | `10` | Number of past conversation turns to retain |
 | `RATE_LIMIT` | `20/minute` | API rate limit per IP |
 | `LOG_LEVEL` | `INFO` | Logging level |
-| `ALLOWED_ORIGINS` | `*` | CORS allowed origins (comma-separated) |
+| `ALLOWED_ORIGINS` | `*` | CORS allowed origins |
 
 ---
 
@@ -200,7 +246,7 @@ pip install -r requirements.txt
 pytest tests/ -v
 ```
 
-Tests use `pytest-asyncio` and mock the RAGService so no OpenAI API key or ChromaDB is required.
+Tests use `pytest-asyncio` and mock the RAGService so no API key or ChromaDB is required.
 
 ---
 
@@ -209,7 +255,10 @@ Tests use `pytest-asyncio` and mock the RAGService so no OpenAI API key or Chrom
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env  # set OPENAI_API_KEY
+cp .env.example .env  # set OPENAI_API_KEY and/or HF_API_TOKEN
+
+# (Optional) install local-mode HuggingFace dependencies
+# pip install transformers torch
 
 # Run backend
 uvicorn app.main:app --reload --port 8000
